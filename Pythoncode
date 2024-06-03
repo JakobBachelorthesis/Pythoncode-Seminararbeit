@@ -1,0 +1,417 @@
+import pulp
+import pandas as pd
+
+#Inputdaten aus der Excel Datei auslesen 
+Daten = pd.read_excel(r"C:\Users\jakob\OneDrive\Desktop\Uni\Master\2024 SS\Seminararbeit\Daten\Inputdaten.xlsx")
+
+# Parameter
+g_t = Daten.at[0, "g_t"] # Anzahl der kostenlos zu Verfügung gestellten ZErtfikate in  t
+g_t_1 = Daten.at[0, "g_t_1"]  #  Anzahl der kostenlos zu Verfügung gestellten ZErtfikate in  t+1
+e_i = Daten["e_i"].head(1).tolist() #Emissionen der Produkte
+db_i = Daten["db_i"].head(1).tolist()  # Deckungsbeitrag der Produkte
+d_i_t = Daten["d_i_t"].head(1).tolist()  # Nachfrage der Produkte in Periode t
+d_i_t_1 = Daten["d_i_t_1"].head(1).tolist()  # Nachfrage der Produkte in Periode t+1
+
+ergebnisse = []
+ergebnisse_2 = []
+    
+
+# iterieren über Zertifikatspreise
+for index, row in Daten.head(1).iterrows():
+    p_c_t = row['p_c_t']
+    p_c_t_1 = row['p_c_t_1']
+
+    # Optimierungsproblem
+    prob = pulp.LpProblem("Gewinnmaximierung", pulp.LpMaximize)
+
+    # Entscheidungsvariablen
+    x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+    x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+    z_t = pulp.LpVariable("z_t", lowBound=None, cat=pulp.LpContinuous)  # Anzahl der gehandelten Zertifikate in Periode t
+    z_t_1 = pulp.LpVariable("z_t+1", lowBound=None, cat=pulp.LpContinuous)  # Anzahl der gehandelten Zertifikate in Periode t+1
+
+    # Zielfunktion
+    prob += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t * z_t - p_c_t_1 * z_t_1
+
+    # Nebenbedingungen
+    for i in range(len(e_i)):
+        # Nachfragebedingung für  t
+        prob += x_i_t[i] <= d_i_t[i]
+        # Nachfragebedingung für  t+1
+        prob += x_i_t_1[i] <= d_i_t_1[i]
+
+    # Anzahl der Zertifikate für Periode t und t+1
+    prob += z_t == pulp.lpSum([e_i[i] * x_i_t[i] for i in range(len(e_i))]) - g_t 
+    prob += z_t_1 == pulp.lpSum([e_i[i] * x_i_t_1[i] for i in range(len(e_i))]) - g_t_1
+
+    #  Optimierungsproblem lösen
+    prob.solve()
+    
+    ergebnis = {
+        "Status": pulp.LpStatus[prob.status],
+        "Gewinn": pulp.value(prob.objective),
+        "z_t": z_t.varValue,
+        "z_t+1": z_t_1.varValue,
+    }
+    for i in range(len(e_i)):
+        ergebnis[f"x_{i+1} in t"] = x_i_t[i].varValue
+        ergebnis[f"x_{i+1} in t+1"] = x_i_t_1[i].varValue
+    ergebnisse.append(ergebnis)
+    
+    
+    #2. Teil des Codes
+    
+    
+    if z_t.varValue >= 0 and z_t_1.varValue >= 0: 
+
+
+        # Optimierungsproblem
+        prob = pulp.LpProblem("Fall_1", pulp.LpMaximize)
+
+        # Entscheidungsvariablen
+        x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+        x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+        s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+        s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+
+        # Zielfunktion
+        prob += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t * (s_t + s_t_1)
+
+        # Nebenbedingungen
+        for i in range(len(e_i)):
+            # Nachfragebedingung für  t
+            prob += x_i_t[i] <= d_i_t[i]
+            # Nachfragebedingung für  t+1
+            prob += x_i_t_1[i] <= d_i_t_1[i]
+
+        # Anzahl der Zertifikate für  t
+        prob += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t 
+        # Anzahl der Zertifikate für  t+1
+        prob += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1 
+
+        #   Optimierungsproblem lösen
+        prob.solve()
+
+        ergebnis_2 = {
+            "Status": pulp.LpStatus[prob.status],
+            "Gewinn": pulp.value(prob.objective),
+            "s_t": s_t.varValue +  s_t_1.varValue,
+            "s_t+1": "0" ,
+            "Fall": "1",
+        }
+        for i in range(len(e_i)):
+            ergebnis_2[f"x_{i+1} in t"] = x_i_t[i].varValue
+            ergebnis_2[f"x_{i+1} in t+1"] = x_i_t_1[i].varValue
+        ergebnisse_2.append(ergebnis_2)
+
+
+    elif (z_t.varValue < 0 and z_t_1.varValue < 0) or (z_t.varValue < 0 and z_t_1.varValue >= 0):
+
+
+        #  Optimierungsproblem -> Es muss erst verglichen werden, ob Verkauf/Kauf in t oder t+1
+        prob_t = pulp.LpProblem("Fall_2_3", pulp.LpMaximize)
+        prob_t_1 = pulp.LpProblem("Fall_2_3", pulp.LpMaximize)
+
+        # Entscheidungsvariablen
+        x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+        x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+        s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+        s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+
+        # Zielfunktion: Maximierung des Gewinns: 2 Varianten -> Verkauf / Kauf in t und t+1
+
+        prob_t += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t * (s_t + s_t_1)
+        prob_t_1 += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t_1 * (s_t + s_t_1)
+
+        for i in range(len(e_i)):
+            # Nachfragebedingung für  t
+            prob_t += x_i_t[i] <= d_i_t[i]
+            prob_t_1+= x_i_t[i] <= d_i_t[i]
+            # Nachfragebedingung für  t+1
+            prob_t += x_i_t_1[i] <= d_i_t_1[i]
+            prob_t_1 += x_i_t_1[i] <= d_i_t_1[i]
+
+        # Anzahl der Zertifikate für  t
+        prob_t += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t 
+        prob_t_1 += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t 
+        # Anzahl der Zertifikate für  t+1
+        prob_t += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1
+        prob_t_1 += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1 
+       
+
+     
+        
+        #  Optimierungsprobleme lösen
+        prob_t.solve()
+        prob_t_1.solve()
+
+        # Zielwerte der Optimierungsprobleme für Verkauf/Kauf in t und t+1
+        value_t = pulp.value(prob_t.objective)
+        value_t_1 = pulp.value(prob_t_1.objective)
+
+        #Auswahl der Zielfunktion
+        
+        if value_t >= value_t_1:
+
+            #Optimierungsproblems
+            prob = pulp.LpProblem("Fall_2_3", pulp.LpMaximize) 
+
+            # Entscheidungsvariablen
+            x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+            s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+
+            # Zielfunktion
+            prob += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t * (s_t + s_t_1)
+
+            for i in range(len(e_i)):
+                # Nachfragebedingung für  t
+                prob += x_i_t[i] <= d_i_t[i]
+                # Nachfragebedingung für  t+1
+                prob += x_i_t_1[i] <= d_i_t_1[i]
+
+            # Anzahl der Zertifikate für  t
+            prob += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t
+            # Anzahl der Zertifikate für  t+1
+            prob += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1
+
+            #  Optimierungsproblem lösen
+            prob.solve()
+
+            ergebnis_2 = {
+                "Status": pulp.LpStatus[prob.status],
+                "Gewinn": pulp.value(prob.objective),
+                "s_t": s_t.varValue +  s_t_1.varValue,
+                "s_t+1": "0",
+                "Fall": "2/3_1",
+            }
+            for i in range(len(e_i)):
+                ergebnis_2[f"x_{i+1} in t"] = x_i_t[i].varValue
+                ergebnis_2[f"x_{i+1} in t+1"] = x_i_t_1[i].varValue
+            ergebnisse_2.append(ergebnis_2)
+
+        else:
+            #Optimierungsproblem
+            prob = pulp.LpProblem("Fall_2_3", pulp.LpMaximize) 
+            
+            # Entscheidungsvariablen
+            x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+            s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+          
+            #Zielfunktion
+            prob += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t_1 * (s_t + s_t_1)
+
+            for i in range(len(e_i)):
+                # Nachfragebedingung für  t
+                prob += x_i_t[i] <= d_i_t[i]
+                # Nachfragebedingung für  t+1
+                prob += x_i_t_1[i] <= d_i_t_1[i]
+
+            # Anzahl der Zertifikate für  t
+            prob += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t
+            # Anzahl der Zertifikate für  t+1
+            prob += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1
+           
+         
+        
+            
+            #  Optimierungsproblem lösen
+            prob.solve()
+
+            ergebnis_2 = {
+                "Status": pulp.LpStatus[prob.status],
+                "Gewinn": pulp.value(prob.objective),
+                "s_t": "0",
+                "s_t+1": s_t.varValue + s_t_1.varValue, 
+                "Fall": "2/3_2",
+            }
+            for i in range(len(e_i)):
+                ergebnis_2[f"x_{i+1} in t"] = x_i_t[i].varValue
+                ergebnis_2[f"x_{i+1} in t+1"] = x_i_t_1[i].varValue
+            ergebnisse_2.append(ergebnis_2)
+
+    elif  z_t.varValue >= 0 and z_t_1.varValue < 0:
+        
+
+        # Zielfunktion
+        if abs(z_t.varValue) >= abs(z_t_1.varValue):
+            
+            #  Optimierungsproblem
+            prob = pulp.LpProblem("Fall_4", pulp.LpMaximize)
+            
+            # Entscheidungsvariablen
+            x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+            s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+
+         
+
+            #Zielfunktion
+            prob += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t * (s_t + s_t_1)
+
+            # Nebenbedingungen
+            for i in range(len(e_i)):
+                # Nachfragebedingung für  t
+                prob += x_i_t[i] <= d_i_t[i]
+                # Nachfragebedingung für  t+1
+                prob += x_i_t_1[i] <= d_i_t_1[i]
+
+            # Anzahl der Zertifikate für  t
+            prob += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t 
+            # Anzahl der Zertifikate für  t+1
+            prob += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1 
+            
+            prob.solve()
+            
+            #  Optimierungsproblem lösen
+            ergebnis_2 = {
+                "Status": pulp.LpStatus[prob.status],
+                "Gewinn": pulp.value(prob.objective),
+                "s_t": s_t.varValue + s_t_1.varValue,
+                "s_t+1": "0",
+                "Fall": "4",
+            }
+            for i in range(len(e_i)):
+                ergebnis_2[f"x_{i+1} in t"] = x_i_t[i].varValue
+                ergebnis_2[f"x_{i+1} in t+1"] = x_i_t_1[i].varValue
+            ergebnisse_2.append(ergebnis_2)
+        else:
+            #  Optimierungsproblem -> Es muss erst verglichen werden, ob Verkauf/Kauf in t oder t+1
+            prob_t = pulp.LpProblem("Fall_4_1", pulp.LpMaximize)
+            prob_t_1 = pulp.LpProblem("Fall_4_2", pulp.LpMaximize)
+
+            # Entscheidungsvariablen
+            x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+            s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+            s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+
+            # Zielfunktion: Maximierung des Gewinns: 2 Varianten -> Verkauf / Kauf in t und t+1
+
+            prob_t += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t * (s_t + s_t_1)
+            prob_t_1 += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t_1 * (s_t + s_t_1)
+
+            for i in range(len(e_i)):
+                # Nachfragebedingung für  t
+                prob_t += x_i_t[i] <= d_i_t[i]
+                prob_t_1+= x_i_t[i] <= d_i_t[i]
+                # Nachfragebedingung für  t+1
+                prob_t += x_i_t_1[i] <= d_i_t_1[i]
+                prob_t_1 += x_i_t_1[i] <= d_i_t_1[i]
+
+            # Anzahl der Zertifikate für  t
+            prob_t += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t 
+            prob_t_1 += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t 
+            # Anzahl der Zertifikate für  t+1
+            prob_t += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1
+            prob_t_1 += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1 
+
+            #  Optimierungsproblem lösen
+            prob_t.solve()
+            prob_t_1.solve()
+
+            # Zielwerte der Optimierungsprobleme für Verkauf/Kauf in t und t+1
+            value_t = pulp.value(prob_t.objective)
+            value_t_1 = pulp.value(prob_t_1.objective)
+            
+            #Auswahl der Zielfunktion
+            if value_t >= value_t_1:
+
+                #Optimierungsproblem
+                prob = pulp.LpProblem("Fall_4", pulp.LpMaximize) 
+
+                # Entscheidungsvariablen
+                x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+                x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+                s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+                s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+
+                # Zielfunktion
+                prob += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t * (s_t + s_t_1)
+
+                for i in range(len(e_i)):
+                    # Nachfragebedingung für  t
+                    prob += x_i_t[i] <= d_i_t[i]
+                    # Nachfragebedingung für  t+1
+                    prob += x_i_t_1[i] <= d_i_t_1[i]
+
+                # Anzahl der Zertifikate für  t
+                prob += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t
+                # Anzahl der Zertifikate für  t+1
+                prob += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1
+
+                # Optimierungsproblem lösen
+                prob.solve()
+
+                ergebnis_2 = {
+                    "Status": pulp.LpStatus[prob.status],
+                    "Gewinn": pulp.value(prob.objective),
+                    "s_t": s_t.varValue + s_t_1.varValue,
+                    "s_t+1": "0",
+                    "Fall": "4",
+                }
+                for i in range(len(e_i)):
+                    ergebnis_2[f"x_{i+1} in t"] = x_i_t[i].varValue
+                    ergebnis_2[f"x_{i+1} in t+1"] = x_i_t_1[i].varValue
+                ergebnisse_2.append(ergebnis_2)
+            else:
+                #Optimierungsproblem
+                prob = pulp.LpProblem("Fall_4", pulp.LpMaximize) 
+                # Entscheidungsvariablen
+                x_i_t = [pulp.LpVariable(f"x_{i}_t", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+                x_i_t_1 = [pulp.LpVariable(f"x_{i}_t+1", lowBound=0, cat=pulp.LpInteger) for i in range(len(e_i))]
+                s_t = pulp.LpVariable("s_t", lowBound=None, cat=pulp.LpContinuous)  
+                s_t_1 = pulp.LpVariable("s_t+1", lowBound=None, cat=pulp.LpContinuous) 
+                #Zielfunktion
+                prob += pulp.lpSum([db_i[i] * (x_i_t[i] + x_i_t_1[i]) for i in range(len(db_i))]) - p_c_t_1 * (s_t + s_t_1)
+
+                for i in range(len(e_i)):
+                    # Nachfragebedingung für  t
+                    prob += x_i_t[i] <= d_i_t[i]
+                    # Nachfragebedingung für  t+1
+                    prob += x_i_t_1[i] <= d_i_t_1[i]
+
+                # Anzahl der Zertifikate für  t
+                prob += s_t == pulp.lpSum([e_i[i] * (x_i_t[i]) for i in range(len(e_i))]) - g_t
+                # Anzahl der Zertifikate für  t+1
+                prob += s_t_1 == pulp.lpSum([e_i[i] * (x_i_t_1[i]) for i in range(len(e_i))]) - g_t_1
+
+                # Optimierungsproblem lösen
+                prob.solve()
+
+                ergebnis_2 = {
+                    "Status": pulp.LpStatus[prob.status],
+                    "Gewinn": pulp.value(prob.objective),
+                    "s_t": "0",
+                    "s_t+1": s_t_1.varValue + s_t.varValue,
+                    "Fall": "4",
+                    
+                }
+                for i in range(len(e_i)):
+                    ergebnis_2[f"x_{i+1} in t"] = x_i_t[i].varValue
+                    ergebnis_2[f"x_{i+1} in t+1"] = x_i_t_1[i].varValue
+                ergebnisse_2.append(ergebnis_2)
+
+# Ergebnisse 2 in Tabelle umwandeln
+ergebnisse_2_df = pd.DataFrame(ergebnisse_2)
+
+print(ergebnisse_2_df)
+ergebnisse_2_df.to_excel(r"C:\Users\jakob\OneDrive\Desktop\Uni\Master\2024 SS\Seminararbeit\Daten\Ergebnisse_2.xlsx", index=True)
+
+
+# Ergebnisse in Tabelle umwandeln
+ergebnisse_df = pd.DataFrame(ergebnisse)
+print(ergebnisse_df)
+ergebnisse_df.to_excel(r"C:\Users\jakob\OneDrive\Desktop\Uni\Master\2024 SS\Seminararbeit\Daten\Ergebnisse.xlsx", index=True)
+
+# Ergebnisse bzw. Tabelle in Excel exportieren
+output_Datei = r"C:\Users\jakob\OneDrive\Desktop\Uni\Master\2024 SS\Seminararbeit\Daten\Alle_Daten.xlsx"
+
+with pd.ExcelWriter(output_Datei) as writer:
+    ergebnisse_df.to_excel(writer, sheet_name='Ergebnisse', index=True)
+    ergebnisse_2_df.to_excel(writer, sheet_name='Ergebnisse_2', index=True)
+    Daten.to_excel(writer, sheet_name='Inputdaten', index=True)
